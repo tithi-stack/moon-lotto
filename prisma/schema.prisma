@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String   @default("Player 1")
+  createdAt DateTime @default(now())
+}
+
+model Game {
+  id                  String               @id @default(uuid())
+  slug                String               @unique // daily-grand, lotto-max, etc
+  name                String
+  cost                Float
+  format              String               // e.g. "5/49+1/7"
+  drawDays            String               // Comma separated, e.g. "Mon,Thu"
+  drawTime            String               // "22:30"
+  minLeadMinutes      Int                  @default(30)
+  
+  historicalDraws     HistoricalDraw[]
+  generatedCandidates GeneratedCandidate[]
+  officialDraws       OfficialDraw[]
+}
+
+model HistoricalDraw {
+  id        String   @id @default(uuid())
+  gameId    String
+  drawAt    DateTime
+  numbers   String   // JSON or comma-separated
+  bonus     String?  // JSON or comma-separated
+  createdAt DateTime @default(now())
+
+  game      Game     @relation(fields: [gameId], references: [id])
+
+  @@unique([gameId, drawAt])
+}
+
+model GenerationEvent {
+  id             String   @id @default(uuid())
+  type           String   // TITHI_CHANGE, NAKSHATRA_CHANGE
+  computedAtUtc  DateTime
+  computedAtLocal DateTime
+  tithiIndex     Int?
+  nakshatraIndex Int?
+  phase          Float?   // Debug info
+  createdAt      DateTime @default(now())
+
+  candidates     GeneratedCandidate[]
+
+  @@unique([type, computedAtUtc])
+}
+
+model GeneratedCandidate {
+  id             String   @id @default(uuid())
+  gameId         String
+  strategy       String   // TITHI, NAKSHATRA
+  eventId        String
+  intendedDrawAt DateTime
+  numbers        String   // The generated numbers
+  bonusNumbers   String?  // Generated bonus numbers (e.g. Grand Number)
+  eligible       Boolean
+  eligibilityReason String?
+  
+  // Full Moon Modifier Metadata
+  modifierApplied Boolean @default(false)
+  modifierBefore  String?
+  modifierAfter   String?
+  modifierRepairSteps Int?
+  
+  createdAt      DateTime @default(now())
+
+  game           Game            @relation(fields: [gameId], references: [id])
+  event          GenerationEvent @relation(fields: [eventId], references: [id])
+  evaluations    Evaluation[]
+
+  @@index([gameId, intendedDrawAt, strategy, eligible])
+}
+
+model OfficialDraw {
+  id        String   @id @default(uuid())
+  gameId    String
+  drawAt    DateTime
+  numbers   String
+  bonus     String?
+  createdAt DateTime @default(now())
+
+  game      Game     @relation(fields: [gameId], references: [id])
+  evaluation Evaluation[]
+  
+  @@unique([gameId, drawAt])
+}
+
+model Evaluation {
+  id              String   @id @default(uuid())
+  officialDrawId  String
+  strategy        String
+  candidateId     String
+  
+  matchCountMain  Int
+  matchCountBonus Int
+  matchCountGrand Int?
+  category        String?
+  prizeValue      Float?
+  
+  createdAt       DateTime @default(now())
+
+  officialDraw    OfficialDraw       @relation(fields: [officialDrawId], references: [id])
+  candidate       GeneratedCandidate @relation(fields: [candidateId], references: [id])
+
+  @@unique([officialDrawId, strategy])
+}
+
+model JobRun {
+  id        String   @id @default(uuid())
+  jobType   String   // PLANNER, SCRAPER, GENERATOR
+  status    String   // SUCCESS, FAILURE
+  message   String?
+  startedAt DateTime @default(now())
+  endedAt   DateTime?
+}

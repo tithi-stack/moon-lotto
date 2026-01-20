@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --background: #fffdf7;
+  --foreground: #18181b;
+  --color-moon-bg: #fffdf7;
+  --color-moon-yellow: #fde047;
+  --color-moon-green: #86efac;
+  --color-moon-pink: #ff9ebb;
+  --color-moon-blue: #bfdbfe;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-moon-bg: var(--color-moon-bg);
+  --color-moon-yellow: var(--color-moon-yellow);
+  --color-moon-green: var(--color-moon-green);
+  --color-moon-pink: var(--color-moon-pink);
+  --color-moon-blue: var(--color-moon-blue);
+  --font-sans: var(--font-inter);
+  --font-heading: var(--font-space-grotesk);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading), sans-serif;
+}
+
+/* Neo-Brutalist Utilities */
+.brutal-shadow {
+  box-shadow: 4px 4px 0px 0px #000000;
+}
+
+.brutal-shadow-sm {
+  box-shadow: 2px 2px 0px 0px #000000;
+}
+
+.brutal-shadow-lg {
+  box-shadow: 6px 6px 0px 0px #000000;
+}
+
+.brutal-hover {
+  transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+}
+
+.brutal-hover:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0px 0px #000000;
+}
+
+.brutal-hover-lift {
+  transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+}
+
+.brutal-hover-lift:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0px 0px #000000;
+}
+
+.bg-grid-pattern {
+  background-image: linear-gradient(#000000 1px, transparent 1px), linear-gradient(90deg, #000000 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+  opacity: 0.03;
+}
