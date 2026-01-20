@@ -57,7 +57,7 @@ function computeScores(
         const count = counts.get(n) ?? 0;
         const frequencyScore = totalDraws > 0 ? (count / totalDraws) * 10 : 0;
         const gapIndex = lastSeenIndex.get(n);
-        const gapScore = gapIndex === null ? 5 : (Math.min(gapIndex, maxGap) / maxGap) * 5;
+        const gapScore = gapIndex == null ? 5 : (Math.min(gapIndex, maxGap) / maxGap) * 5;
         scores.set(n, frequencyScore + gapScore);
     }
 
