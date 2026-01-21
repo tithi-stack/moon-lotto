@@ -65,7 +65,7 @@ export async function GET(request: Request) {
                     drawTime: game.drawTime
                 },
                 historicalDrawCount: historicalDraws.length,
-                historicalDraws: historicalDraws.slice(0, 10), // Just show recent
+                historicalDraws,
                 officialDraws,
                 candidates,
                 stats: {

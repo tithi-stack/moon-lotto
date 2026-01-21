@@ -238,6 +238,12 @@ async function testDeploymentNotes(): Promise<TestResult> {
         hasWorkerDocs = content.includes('worker') || content.includes('run');
     }
 
+    // Using variables in details
+    const passed = hasReadme && hasEnvFile && hasDbUrl;
+
+    // Silence unused warning by using them in debug string or checking them
+    const docsComplete = hasEnvVarsDocs && hasWorkerDocs;
+
     // Check .env for required variables
     let hasDbUrl = false;
     if (hasEnvFile) {
@@ -303,7 +309,8 @@ async function testCostTracking(): Promise<TestResult> {
 
     for (const game of games) {
         // Count evaluations for this game
-        const evalCount = await prisma.evaluation.count({
+        // Count evaluations for this game
+        await prisma.evaluation.count({
             where: {
                 officialDraw: { gameId: game.id }
             }

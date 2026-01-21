@@ -201,7 +201,7 @@ export function generateNumbers(
 
     // Use provided seed or derive from date
     const effectiveSeed = seed ?? eventDate.getTime();
-    const random = createSeededRandom(effectiveSeed);
+    // random removed
 
     // Get Tithi/Nakshatra based on strategy
     const tithi = getTithi(eventDate);

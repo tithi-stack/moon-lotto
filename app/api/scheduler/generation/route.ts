@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { generateMultiStrategy, STRATEGIES, type MultiStrategy } from '@/lib/generator/multi-strategy';
 import { GAME_CONFIGS } from '@/lib/generator';
+import { loadMultiStrategyStats } from '@/lib/generator/multi-strategy-stats';
 
 interface GenerationPayload {
     eventType: 'TITHI_CHANGE' | 'NAKSHATRA_CHANGE';
@@ -19,6 +20,88 @@ interface GenerationPayload {
     games: string[];
     strategies: string[];
     linesPerStrategy: number;
+}
+
+const TORONTO_TZ = 'America/Toronto';
+
+function getZonedParts(date: Date, timeZone: string): {
+    year: number;
+    month: number;
+    day: number;
+    weekday: string;
+    hour: number;
+    minute: number;
+    second: number;
+} {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+
+    const parts = formatter.formatToParts(date).reduce((acc, part) => {
+        if (part.type !== 'literal') {
+            acc[part.type] = part.value;
+        }
+        return acc;
+    }, {} as Record<string, string>);
+
+    return {
+        year: Number(parts.year),
+        month: Number(parts.month),
+        day: Number(parts.day),
+        weekday: parts.weekday,
+        hour: Number(parts.hour),
+        minute: Number(parts.minute),
+        second: Number(parts.second)
+    };
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string): number {
+    const parts = getZonedParts(date, timeZone);
+    const asUTC = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    return asUTC - date.getTime();
+}
+
+function toUtcDate(
+    year: number,
+    month: number,
+    day: number,
+    hour: number,
+    minute: number,
+    second: number,
+    timeZone: string
+): Date {
+    const assumedUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    const offsetMs = getTimeZoneOffsetMs(assumedUtc, timeZone);
+    return new Date(assumedUtc.getTime() - offsetMs);
+}
+
+function getNextDrawTimeToronto(eventTime: Date, drawDays: string, drawTime: string): Date {
+    const daySet = new Set(drawDays.split(',').map((d) => d.trim().toLowerCase()));
+    const [drawHour, drawMinute] = drawTime.split(':').map(Number);
+
+    for (let i = 0; i <= 7; i++) {
+        const candidate = new Date(eventTime.getTime() + i * 24 * 60 * 60 * 1000);
+        const parts = getZonedParts(candidate, TORONTO_TZ);
+
+        if (!daySet.has(parts.weekday.toLowerCase())) {
+            continue;
+        }
+
+        const drawUtc = toUtcDate(parts.year, parts.month, parts.day, drawHour, drawMinute, 0, TORONTO_TZ);
+        if (drawUtc.getTime() > eventTime.getTime()) {
+            return drawUtc;
+        }
+    }
+
+    return new Date(eventTime.getTime() + 24 * 60 * 60 * 1000);
 }
 
 export async function POST(request: NextRequest) {
@@ -79,6 +162,7 @@ export async function POST(request: NextRequest) {
 
             // Check eligibility based on draw schedule
             const eligibility = checkEligibility(game, eventTime);
+            const strategyStats = await loadMultiStrategyStats(prisma, gameSlug, gameConfig, gameConfig.historyCount);
 
             // Generate for each strategy (5 strategies, 1 line each)
             for (const strategyName of payload.strategies) {
@@ -98,7 +182,8 @@ export async function POST(request: NextRequest) {
                     gameSlug,
                     strategy,
                     eventTime,
-                    strategySeed
+                    strategySeed,
+                    strategyStats ?? undefined
                 );
 
                 // Save to database
@@ -158,29 +243,7 @@ function checkEligibility(
     game: { drawDays: string; drawTime: string; minLeadMinutes: number },
     eventTime: Date
 ): { eligible: boolean; reason: string; nextDrawTime: Date } {
-    const drawDays = game.drawDays.split(',').map(d => d.trim().toLowerCase());
-    const [drawHour, drawMinute] = game.drawTime.split(':').map(Number);
-
-    // Find the next draw from event time
-    let nextDraw = new Date(eventTime);
-    nextDraw.setHours(drawHour, drawMinute, 0, 0);
-
-    // If today's draw time has passed, start from tomorrow
-    if (nextDraw <= eventTime) {
-        nextDraw.setDate(nextDraw.getDate() + 1);
-    }
-
-    // Find the next valid draw day
-    const dayNames = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    let attempts = 0;
-    while (attempts < 7) {
-        const dayName = dayNames[nextDraw.getDay()];
-        if (drawDays.includes(dayName)) {
-            break;
-        }
-        nextDraw.setDate(nextDraw.getDate() + 1);
-        attempts++;
-    }
+    const nextDraw = getNextDrawTimeToronto(eventTime, game.drawDays, game.drawTime);
 
     // Check if we have enough lead time
     const leadTimeMs = nextDraw.getTime() - eventTime.getTime();

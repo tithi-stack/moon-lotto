@@ -17,8 +17,6 @@ import {
 } from '../scraper/index';
 import {
     computeMatches,
-    createEvaluation,
-    selectCandidateForEvaluation
 } from '../evaluation/index';
 
 const prisma = new PrismaClient();
@@ -31,17 +29,7 @@ interface TestResult {
 
 const results: TestResult[] = [];
 
-// Clean up test data
-async function cleanupTestData() {
-    // Delete test evaluations
-    await prisma.evaluation.deleteMany({});
-    // Delete test official draws
-    await prisma.officialDraw.deleteMany({});
-    // Delete test candidates
-    await prisma.generatedCandidate.deleteMany({});
-    // Delete test events
-    await prisma.generationEvent.deleteMany({});
-}
+
 
 // Test 1: Parser robustness - HTML change causes clear error + raw HTML saved
 async function testParserRobustness(): Promise<TestResult> {

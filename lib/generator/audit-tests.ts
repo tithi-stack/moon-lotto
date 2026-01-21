@@ -10,6 +10,7 @@
 import {
     generateNumbers,
     validateNumbers,
+    digitalRoot,
     GAME_CONFIGS,
     Strategy,
     GenerationResult
@@ -162,7 +163,7 @@ function testSimulatedReplay(): TestResult {
                     if (elapsed > TIMEOUT_MS) {
                         failures++;
                     }
-                } catch (e) {
+                } catch {
                     failures++;
                 }
 
@@ -224,8 +225,7 @@ function testDigitalRoot(): TestResult {
         { input: 99, expected: 9 },
     ];
 
-    // Import digitalRoot from generator
-    const { digitalRoot } = require('./index');
+    // Import digitalRoot from generator (added to top imports)
 
     let failures = 0;
     const errorSamples: string[] = [];

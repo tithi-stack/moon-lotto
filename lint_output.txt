@@ -1,0 +1,139 @@
+﻿
+> web@0.1.0 lint
+> eslint
+
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx
+  61:36  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx:61:36
+  59 |
+  60 |     // State for current time to avoid hydration mismatch
+> 61 |     const [now, setNow] = useState(Date.now());
+     |                                    ^^^^^^^^^^ Cannot call impure function
+  62 |
+  63 |     useEffect(() => {
+  64 |         const interval = setInterval(() => setNow(Date.now()), 60000); // Update every minute                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/purity
+  70:9   error  Error: Cannot access variable before it is declared
+
+`fetchTiming` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx:70:9
+  68 |     // Fetch timing info on load
+  69 |     useEffect(() => {
+> 70 |         fetchTiming();
+     |         ^^^^^^^^^^^ `fetchTiming` accessed before it is declared
+  71 |         fetchHistory();
+  72 |     }, [fetchTiming, fetchHistory]);
+  73 |
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx:74:5
+  72 |     }, [fetchTiming, fetchHistory]);
+  73 |
+> 74 |     const fetchTiming = useCallback(async () => {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 75 |         try {
+     | ^^^^^^^^^^^^^
+> 76 |             const res = await fetch('/api/generate');
+     | ^^^^^^^^^^^^^
+> 77 |             const data = await res.json();
+     | ^^^^^^^^^^^^^
+> 78 |             setTiming(data);
+     | ^^^^^^^^^^^^^
+> 79 |         } catch (e) {
+     | ^^^^^^^^^^^^^
+> 80 |             console.error('Failed to fetch timing:', e);
+     | ^^^^^^^^^^^^^
+> 81 |         }
+     | ^^^^^^^^^^^^^
+> 82 |     }, []);
+     | ^^^^^^^^^^^^ `fetchTiming` is declared here
+  83 |
+  84 |     const fetchHistory = useCallback(async () => {
+  85 |         try {  react-hooks/immutability
+  71:9   error  Error: Cannot access variable before it is declared
+
+`fetchHistory` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx:71:9
+  69 |     useEffect(() => {
+  70 |         fetchTiming();
+> 71 |         fetchHistory();
+     |         ^^^^^^^^^^^^ `fetchHistory` accessed before it is declared
+  72 |     }, [fetchTiming, fetchHistory]);
+  73 |
+  74 |     const fetchTiming = useCallback(async () => {
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx:84:5
+  82 |     }, []);
+  83 |
+> 84 |     const fetchHistory = useCallback(async () => {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 85 |         try {
+     | ^^^^^^^^^^^^^
+> 86 |             const res = await fetch('/api/history');
+     | ^^^^^^^^^^^^^
+> 87 |             const data = await res.json();
+     | ^^^^^^^^^^^^^
+> 88 |             setHistory(data);
+     | ^^^^^^^^^^^^^
+> 89 |         } catch (e) {
+     | ^^^^^^^^^^^^^
+> 90 |             console.error('Failed to fetch history:', e);
+     | ^^^^^^^^^^^^^
+> 91 |         }
+     | ^^^^^^^^^^^^^
+> 92 |     }, []);
+     | ^^^^^^^^^^^^ `fetchHistory` is declared here
+  93 |
+  94 |     const generatePicks = async () => {
+  95 |         setLoading(true);  react-hooks/immutability
+
+C:\Users\logis\Moon Lotto\web\app\api\scheduler\generation\route.ts
+  168:9  error  'nextDraw' is never reassigned. Use 'const' instead  prefer-const
+
+C:\Users\logis\Moon Lotto\web\app\history\page.tsx
+  85:9  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\logis\Moon Lotto\web\app\history\page.tsx:85:9
+  83 |
+  84 |     useEffect(() => {
+> 85 |         fetchHistory();
+     |         ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  86 |     }, [fetchHistory]);
+  87 |
+  88 |     const formatDate = (dateStr: string) => {  react-hooks/set-state-in-effect
+
+C:\Users\logis\Moon Lotto\web\app\page.tsx
+  12:9  warning  '_currentNakshatra' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\astronomy\engine.ts
+  4:7  warning  '_LOCATION' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\dashboard\audit-tests.ts
+  237:9   warning  'hasEnvVarsDocs' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  238:9   warning  'hasWorkerDocs' is assigned a value but never used   @typescript-eslint/no-unused-vars
+  306:15  warning  'evalCount' is assigned a value but never used       @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\generator\audit-tests.ts
+  166:26  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\generator\index.ts
+  204:11  warning  'random' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\scraper\audit-tests.ts
+  20:5   warning  'createEvaluation' is defined but never used              @typescript-eslint/no-unused-vars
+  21:5   warning  'selectCandidateForEvaluation' is defined but never used  @typescript-eslint/no-unused-vars
+  35:16  warning  'cleanupTestData' is defined but never used               @typescript-eslint/no-unused-vars
+
+Γ£û 15 problems (5 errors, 10 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+

@@ -11,6 +11,7 @@
 
 import { getTithi, getNakshatra, isFullMoonDate } from '../astronomy/engine';
 import { GAME_CONFIGS, type GameConfig } from './index';
+import { MultiStrategyStats } from './multi-strategy-stats';
 
 // All available strategies
 export const STRATEGIES = [
@@ -63,6 +64,27 @@ function shuffleArray<T>(arr: T[], random: () => number): T[] {
     return result;
 }
 
+function pickWeightedNumber(
+    weights: Map<number, number>,
+    random: () => number,
+    min: number,
+    max: number
+): number {
+    const entries: Array<[number, number]> = [];
+    for (let n = min; n <= max; n++) {
+        const weight = Math.max(1, weights.get(n) ?? 1);
+        entries.push([n, weight]);
+    }
+
+    const totalWeight = entries.reduce((sum, [, weight]) => sum + weight, 0);
+    let r = random() * totalWeight;
+    for (const [value, weight] of entries) {
+        r -= weight;
+        if (r <= 0) return value;
+    }
+    return min;
+}
+
 /**
  * STATISTICAL Strategy
  * Uses frequency simulation and gap analysis
@@ -71,21 +93,30 @@ function shuffleArray<T>(arr: T[], random: () => number): T[] {
 function generateStatistical(
     config: GameConfig,
     seed: number,
-    tithiIndex: number
+    tithiIndex: number,
+    stats?: MultiStrategyStats
 ): { numbers: number[]; metadata: Record<string, unknown> } {
     const random = createSeededRandom(seed);
     const tithiRoot = digitalRoot(tithiIndex);
 
-    // Simulate frequency scores (in production, use actual historical data)
+    const freqMap = stats?.frequency;
+    const gapMap = stats?.gaps;
+    const maxFreq = freqMap ? Math.max(1, ...freqMap.values()) : 1;
+    const maxGap = gapMap ? Math.max(1, ...gapMap.values()) : 1;
+
     const candidates: Array<{ n: number; score: number }> = [];
 
     for (let n = config.mainMin; n <= config.mainMax; n++) {
-        const baseFreq = random() * 10;
-        const gap = Math.floor(random() * 20);
+        const baseFreq = freqMap
+            ? ((freqMap.get(n) ?? 0) / maxFreq) * 10
+            : random() * 10;
+        const gapScore = gapMap
+            ? ((gapMap.get(n) ?? 0) / maxGap) * 6
+            : Math.floor(random() * 20) * 0.3;
         const rootBonus = digitalRoot(n) === tithiRoot ? 5 : 0;
 
-        // Score = Frequency * 0.6 + Gap * 0.3 + Root Bonus
-        const score = (baseFreq * 0.6) + (gap * 0.3) + rootBonus;
+        // Score = Frequency * 0.7 + Gap * 0.3 + Root Bonus
+        const score = (baseFreq * 0.7) + (gapScore * 0.3) + rootBonus;
         candidates.push({ n, score });
     }
 
@@ -94,7 +125,7 @@ function generateStatistical(
 
     return {
         numbers,
-        metadata: { method: 'frequency_gap', tithiRoot }
+        metadata: { method: 'frequency_gap', tithiRoot, source: stats ? 'historical' : 'simulated' }
     };
 }
 
@@ -104,22 +135,31 @@ function generateStatistical(
  */
 function generatePoisson(
     config: GameConfig,
-    seed: number
+    seed: number,
+    stats?: MultiStrategyStats
 ): { numbers: number[]; metadata: Record<string, unknown> } {
     const random = createSeededRandom(seed);
 
-    // Target sum range based on game
-    const targetSumMin = Math.floor(((config.mainMin + config.mainMax) / 2) * config.mainCount * 0.85);
-    const targetSumMax = Math.floor(((config.mainMin + config.mainMax) / 2) * config.mainCount * 1.15);
+    const baselineMean = ((config.mainMin + config.mainMax) / 2) * config.mainCount;
+    const mean = stats?.sumMean ?? baselineMean;
+    const std = stats
+        ? Math.max(stats.sumStdDev, baselineMean * 0.05)
+        : (baselineMean * 0.1);
+    const minPossible = config.mainMin * config.mainCount;
+    const maxPossible = config.mainMax * config.mainCount;
+    const targetSumMin = Math.max(minPossible, Math.floor(mean - std));
+    const targetSumMax = Math.min(maxPossible, Math.floor(mean + std));
 
-    // Target parity: ~half odd, half even
-    const targetOdd = Math.floor(config.mainCount / 2);
+    const targetOdd = stats?.oddMean !== undefined
+        ? Math.round(stats.oddMean)
+        : Math.floor(config.mainCount / 2);
 
     let bestNumbers: number[] = [];
     let bestScore = -Infinity;
 
     // Try multiple combinations
-    for (let attempt = 0; attempt < 100; attempt++) {
+    const maxAttempts = stats ? 1000 : 100;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const pool = Array.from({ length: config.mainMax - config.mainMin + 1 }, (_, i) => config.mainMin + i);
         const shuffled = shuffleArray(pool, random);
         const candidate = shuffled.slice(0, config.mainCount).sort((a, b) => a - b);
@@ -145,7 +185,8 @@ function generatePoisson(
         metadata: {
             method: 'sum_parity_balance',
             sum: bestNumbers.reduce((a, b) => a + b, 0),
-            oddCount: bestNumbers.filter(n => n % 2 === 1).length
+            oddCount: bestNumbers.filter(n => n % 2 === 1).length,
+            source: stats ? 'historical' : 'simulated'
         }
     };
 }
@@ -156,19 +197,22 @@ function generatePoisson(
  */
 function generateDelta(
     config: GameConfig,
-    seed: number
+    seed: number,
+    stats?: MultiStrategyStats
 ): { numbers: number[]; metadata: Record<string, unknown> } {
     const random = createSeededRandom(seed);
 
-    // Common delta distribution (1-5 are most common)
-    const deltaWeights = [0, 20, 18, 15, 12, 10, 8, 6, 5, 4, 3, 2, 1];
+    const statDeltaWeights = stats?.deltaWeights;
+    const deltaWeights = statDeltaWeights && statDeltaWeights.size > 0
+        ? Array.from(statDeltaWeights.entries())
+        : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((d, i) => [d, Math.max(1, 12 - i)] as const);
 
     function pickDelta(): number {
-        const totalWeight = deltaWeights.reduce((a, b) => a + b, 0);
+        const totalWeight = deltaWeights.reduce((a, b) => a + b[1], 0);
         let r = random() * totalWeight;
-        for (let i = 1; i < deltaWeights.length; i++) {
-            r -= deltaWeights[i];
-            if (r <= 0) return i;
+        for (const [delta, weight] of deltaWeights) {
+            r -= weight;
+            if (r <= 0) return delta;
         }
         return 1;
     }
@@ -176,9 +220,11 @@ function generateDelta(
     let attempts = 0;
     let numbers: number[] = [];
 
+    const maxStart = config.mainMax - (config.mainCount - 1);
     while (attempts < 50) {
-        // Start with a random first number in valid range
-        const first = Math.floor(random() * (config.mainMax / 3)) + config.mainMin;
+        const first = stats?.frequency
+            ? pickWeightedNumber(stats.frequency, random, config.mainMin, maxStart)
+            : Math.floor(random() * (maxStart - config.mainMin + 1)) + config.mainMin;
         numbers = [first];
 
         for (let i = 1; i < config.mainCount; i++) {
@@ -202,7 +248,7 @@ function generateDelta(
 
     return {
         numbers,
-        metadata: { method: 'delta_construction', deltas }
+        metadata: { method: 'delta_construction', deltas, source: stats ? 'historical' : 'simulated' }
     };
 }
 
@@ -213,30 +259,42 @@ function generateDelta(
 function generateMarkov(
     config: GameConfig,
     seed: number,
-    nakshatraIndex: number
+    nakshatraIndex: number,
+    stats?: MultiStrategyStats
 ): { numbers: number[]; metadata: Record<string, unknown> } {
     const random = createSeededRandom(seed);
 
-    // Use Nakshatra as the "seed" number for the walk
-    const startNum = ((nakshatraIndex * 2) % (config.mainMax - config.mainMin)) + config.mainMin;
+    const historyStart = stats?.lastDraw?.[0];
+    const startNum = historyStart
+        ? historyStart
+        : ((nakshatraIndex * 2) % (config.mainMax - config.mainMin)) + config.mainMin;
 
     const numbers = new Set<number>([startNum]);
     let current = startNum;
 
     // Simulate transition probabilities (numbers close together or with similar digital roots)
     while (numbers.size < config.mainCount) {
-        // Next number is biased towards nearby numbers or same digital root
         const candidates: Array<{ n: number; prob: number }> = [];
 
-        for (let n = config.mainMin; n <= config.mainMax; n++) {
-            if (numbers.has(n)) continue;
+        const transitionMap = stats?.transitions.get(current);
+        if (transitionMap && transitionMap.size > 0) {
+            for (const [n, count] of transitionMap.entries()) {
+                if (numbers.has(n)) continue;
+                const rootMatch = digitalRoot(n) === digitalRoot(current) ? 2 : 0;
+                const prob = count + rootMatch + random();
+                candidates.push({ n, prob });
+            }
+        } else {
+            for (let n = config.mainMin; n <= config.mainMax; n++) {
+                if (numbers.has(n)) continue;
 
-            const distance = Math.abs(n - current);
-            const rootMatch = digitalRoot(n) === digitalRoot(current) ? 3 : 0;
+                const distance = Math.abs(n - current);
+                const rootMatch = digitalRoot(n) === digitalRoot(current) ? 3 : 0;
 
-            // Higher prob for closer numbers or matching roots
-            const prob = (1 / (distance + 1)) * 10 + rootMatch + random() * 2;
-            candidates.push({ n, prob });
+                // Higher prob for closer numbers or matching roots
+                const prob = (1 / (distance + 1)) * 10 + rootMatch + random() * 2;
+                candidates.push({ n, prob });
+            }
         }
 
         candidates.sort((a, b) => b.prob - a.prob);
@@ -251,7 +309,7 @@ function generateMarkov(
 
     return {
         numbers: result,
-        metadata: { method: 'markov_walk', nakshatraSeed: startNum }
+        metadata: { method: 'markov_walk', nakshatraSeed: startNum, source: stats ? 'historical' : 'simulated' }
     };
 }
 
@@ -264,15 +322,16 @@ function generateHybrid(
     seed: number,
     tithiIndex: number,
     nakshatraIndex: number,
-    isFullMoon: boolean
+    isFullMoon: boolean,
+    stats?: MultiStrategyStats
 ): { numbers: number[]; metadata: Record<string, unknown> } {
     const random = createSeededRandom(seed);
 
     // Generate candidates from each strategy
-    const statistical = generateStatistical(config, seed + 1000, tithiIndex);
-    const poisson = generatePoisson(config, seed + 2000);
-    const delta = generateDelta(config, seed + 3000);
-    const markov = generateMarkov(config, seed + 4000, nakshatraIndex);
+    const statistical = generateStatistical(config, seed + 1000, tithiIndex, stats);
+    const poisson = generatePoisson(config, seed + 2000, stats);
+    const delta = generateDelta(config, seed + 3000, stats);
+    const markov = generateMarkov(config, seed + 4000, nakshatraIndex, stats);
 
     // Count how many strategies agree on each number
     const votes: Map<number, number> = new Map();
@@ -288,7 +347,7 @@ function generateHybrid(
         .map(([n, v]) => ({ n, v, r: random() }))
         .sort((a, b) => b.v - a.v || b.r - a.r);
 
-    let numbers = candidates.slice(0, config.mainCount).map(c => c.n).sort((a, b) => a - b);
+    const numbers = candidates.slice(0, config.mainCount).map(c => c.n).sort((a, b) => a - b);
 
     // Apply Full Moon modifier if applicable
     if (isFullMoon && numbers.length > 0) {
@@ -306,7 +365,8 @@ function generateHybrid(
         metadata: {
             method: 'consensus_filter',
             votes: Object.fromEntries(candidates.slice(0, 10).map(c => [c.n, c.v])),
-            fullMoonModified: isFullMoon
+            fullMoonModified: isFullMoon,
+            source: stats ? 'historical' : 'simulated'
         }
     };
 }
@@ -318,7 +378,8 @@ export function generateMultiStrategy(
     gameSlug: string,
     strategy: MultiStrategy,
     eventDate: Date,
-    seed?: number
+    seed?: number,
+    stats?: MultiStrategyStats
 ): MultiStrategyResult {
     const config = GAME_CONFIGS[gameSlug];
     if (!config) {
@@ -334,19 +395,19 @@ export function generateMultiStrategy(
 
     switch (strategy) {
         case 'STATISTICAL':
-            result = generateStatistical(config, effectiveSeed, tithi.index);
+            result = generateStatistical(config, effectiveSeed, tithi.index, stats);
             break;
         case 'POISSON':
-            result = generatePoisson(config, effectiveSeed);
+            result = generatePoisson(config, effectiveSeed, stats);
             break;
         case 'DELTA':
-            result = generateDelta(config, effectiveSeed);
+            result = generateDelta(config, effectiveSeed, stats);
             break;
         case 'MARKOV':
-            result = generateMarkov(config, effectiveSeed, nakshatra.index);
+            result = generateMarkov(config, effectiveSeed, nakshatra.index, stats);
             break;
         case 'HYBRID':
-            result = generateHybrid(config, effectiveSeed, tithi.index, nakshatra.index, fullMoon);
+            result = generateHybrid(config, effectiveSeed, tithi.index, nakshatra.index, fullMoon, stats);
             break;
         default:
             throw new Error(`Unknown strategy: ${strategy}`);

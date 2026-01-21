@@ -19,7 +19,7 @@ import {
 
 // Test configuration
 const TEST_ITERATIONS = 1000;
-const TOLERANCE_MS = 5000; // 5 seconds
+
 
 interface TestResult {
     name: string;
@@ -39,7 +39,7 @@ function randomDate2026(): Date {
 // Test 1: Tithi indices always in valid range (1-30)
 function testTithiRange(): TestResult {
     let failures = 0;
-    let failedValues: number[] = [];
+    const failedValues: number[] = [];
 
     for (let i = 0; i < TEST_ITERATIONS; i++) {
         const date = randomDate2026();
@@ -63,7 +63,7 @@ function testTithiRange(): TestResult {
 // Test 2: Nakshatra indices always in valid range (1-27)
 function testNakshatraRange(): TestResult {
     let failures = 0;
-    let failedValues: number[] = [];
+    const failedValues: number[] = [];
 
     for (let i = 0; i < TEST_ITERATIONS; i++) {
         const date = randomDate2026();

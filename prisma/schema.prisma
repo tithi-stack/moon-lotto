@@ -89,6 +89,7 @@ model OfficialDraw {
   drawAt    DateTime
   numbers   String
   bonus     String?
+  prizeData String?
   createdAt DateTime @default(now())
 
   game      Game     @relation(fields: [gameId], references: [id])
@@ -108,13 +109,14 @@ model Evaluation {
   matchCountGrand Int?
   category        String?
   prizeValue      Float?
+  prizeText       String?
   
   createdAt       DateTime @default(now())
 
   officialDraw    OfficialDraw       @relation(fields: [officialDrawId], references: [id])
   candidate       GeneratedCandidate @relation(fields: [candidateId], references: [id])
 
-  @@unique([officialDrawId, strategy])
+  @@unique([officialDrawId, candidateId])
 }
 
 model JobRun {

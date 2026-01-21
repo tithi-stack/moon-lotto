@@ -11,6 +11,7 @@
     "seed:historical": "tsx prisma/seed-historical.ts",
     "audit:scraper": "tsx lib/scraper/audit-tests.ts",
     "audit:generator": "tsx lib/generator/audit-tests.ts",
+    "audit:multi-strategy": "tsx lib/generator/multi-strategy-audit.ts",
     "audit:dashboard": "tsx lib/dashboard/audit-tests.ts",
     "backtest": "tsx lib/generator/backtest.ts"
   },

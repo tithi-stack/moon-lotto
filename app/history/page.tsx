@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { Moon, Calendar, TrendingUp, History as HistoryIcon } from "lucide-react";
 import Link from 'next/link';
@@ -38,7 +38,9 @@ interface OfficialDraw {
     evaluation: Array<{
         strategy: string;
         matchCountMain: number;
-        category: string;
+        category: string | null;
+        prizeValue: number | null;
+        prizeText: string | null;
         candidate: {
             numbers: string;
         };
@@ -64,16 +66,58 @@ interface GameHistory {
     };
 }
 
+function scoreEvaluation(evaluation: OfficialDraw['evaluation'][number]) {
+    if (evaluation.prizeText && evaluation.prizeText.toUpperCase().includes('LIFE')) {
+        return Number.POSITIVE_INFINITY;
+    }
+    if (typeof evaluation.prizeValue === 'number') {
+        return evaluation.prizeValue;
+    }
+    return evaluation.matchCountMain;
+}
+
+function summarizeEvaluations(evaluations: OfficialDraw['evaluation']) {
+    const byStrategy = new Map<string, OfficialDraw['evaluation']>();
+
+    for (const evaluation of evaluations) {
+        const bucket = byStrategy.get(evaluation.strategy);
+        if (bucket) {
+            bucket.push(evaluation);
+        } else {
+            byStrategy.set(evaluation.strategy, [evaluation]);
+        }
+    }
+
+    const summary = Array.from(byStrategy.entries()).map(([strategy, items]) => {
+        const best = items.reduce((currentBest, candidate) => {
+            const currentScore = scoreEvaluation(currentBest);
+            const candidateScore = scoreEvaluation(candidate);
+            if (candidateScore > currentScore) {
+                return candidate;
+            }
+            if (candidateScore === currentScore && candidate.matchCountMain > currentBest.matchCountMain) {
+                return candidate;
+            }
+            return currentBest;
+        }, items[0]);
+
+        return {
+            strategy,
+            best,
+            count: items.length
+        };
+    });
+
+    return summary.sort((a, b) => a.strategy.localeCompare(b.strategy));
+}
+
 export default function HistoryPage() {
     const [history, setHistory] = useState<GameHistory[]>([]);
     const [selectedGame, setSelectedGame] = useState<string>('all');
+    const [expandedHistorical, setExpandedHistorical] = useState<Record<string, boolean>>({});
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchHistory();
-    }, []);
-
-    const fetchHistory = async () => {
+    const fetchHistory = useCallback(async () => {
         try {
             const res = await fetch('/api/history');
             const data = await res.json();
@@ -82,7 +126,12 @@ export default function HistoryPage() {
             console.error('Failed to fetch history:', e);
         }
         setLoading(false);
-    };
+    }, []);
+
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        fetchHistory();
+    }, [fetchHistory]);
 
     const formatDate = (dateStr: string) => {
         return new Date(dateStr).toLocaleString('en-CA', {
@@ -173,6 +222,79 @@ export default function HistoryPage() {
                                     </div>
                                 </div>
 
+                                {/* Historical Winning Numbers */}
+                                <div className="mb-6">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h3 className="font-bold text-lg flex items-center gap-2">
+                                            <HistoryIcon className="w-5 h-5" />
+                                            Historical Winning Numbers
+                                        </h3>
+                                        {item.historicalDraws.length > 10 && (
+                                            <button
+                                                className="text-xs font-bold underline"
+                                                onClick={() => setExpandedHistorical(prev => ({
+                                                    ...prev,
+                                                    [item.game.slug]: !prev[item.game.slug]
+                                                }))}
+                                            >
+                                                {expandedHistorical[item.game.slug] ? 'Show latest 10' : `Show all ${item.historicalDraws.length}`}
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {item.historicalDraws.length === 0 ? (
+                                        <div className="text-zinc-500 text-sm py-4">
+                                            No historical draws available yet.
+                                        </div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm">
+                                                <thead>
+                                                    <tr className="border-b-2 border-black">
+                                                        <th className="text-left py-2 px-3">Draw Date</th>
+                                                        <th className="text-left py-2 px-3">Winning Numbers</th>
+                                                        <th className="text-left py-2 px-3">Bonus/Grand</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {(expandedHistorical[item.game.slug]
+                                                        ? item.historicalDraws
+                                                        : item.historicalDraws.slice(0, 10)
+                                                    ).map((draw) => (
+                                                        <tr key={draw.id} className="border-b border-black/10">
+                                                            <td className="py-2 px-3">
+                                                                {formatDate(draw.drawAt)}
+                                                            </td>
+                                                            <td className="py-2 px-3">
+                                                                <div className="flex gap-1 flex-wrap">
+                                                                    {formatNumbers(draw.numbers).map((n, i) => (
+                                                                        <span key={i} className="w-7 h-7 rounded-full border-2 border-black flex items-center justify-center bg-moon-blue font-bold text-xs">
+                                                                            {n}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            </td>
+                                                            <td className="py-2 px-3">
+                                                                {draw.bonus ? (
+                                                                    <div className="flex items-center gap-1">
+                                                                        {formatNumbers(draw.bonus).map((n, i) => (
+                                                                            <span key={i} className="w-6 h-6 rounded-full border-2 border-black flex items-center justify-center bg-moon-green font-bold text-xs">
+                                                                                {n}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-xs text-zinc-500">-</span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+
                                 {/* Generated Candidates */}
                                 <div className="mb-6">
                                     <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
@@ -259,14 +381,12 @@ export default function HistoryPage() {
                                                     <tr className="border-b-2 border-black">
                                                         <th className="text-left py-2 px-3">Draw Date</th>
                                                         <th className="text-left py-2 px-3">Winning Numbers</th>
-                                                        <th className="text-left py-2 px-3">TITHI Matches</th>
-                                                        <th className="text-left py-2 px-3">NAKSHATRA Matches</th>
+                                                        <th className="text-left py-2 px-3">Strategy Results</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {item.officialDraws.map((draw) => {
-                                                        const tithiEval = draw.evaluation.find(e => e.strategy === 'TITHI');
-                                                        const nakEval = draw.evaluation.find(e => e.strategy === 'NAKSHATRA');
+                                                        const evaluationSummary = summarizeEvaluations(draw.evaluation);
 
                                                         return (
                                                             <tr key={draw.id} className="border-b border-black/10">
@@ -283,23 +403,24 @@ export default function HistoryPage() {
                                                                     </div>
                                                                 </td>
                                                                 <td className="py-2 px-3">
-                                                                    {tithiEval ? (
-                                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${tithiEval.matchCountMain >= 4 ? 'bg-green-200' :
-                                                                            tithiEval.matchCountMain >= 2 ? 'bg-yellow-200' :
-                                                                                'bg-gray-100'
-                                                                            }`}>
-                                                                            {tithiEval.matchCountMain} matches
-                                                                        </span>
-                                                                    ) : '-'}
-                                                                </td>
-                                                                <td className="py-2 px-3">
-                                                                    {nakEval ? (
-                                                                        <span className={`px-2 py-1 rounded text-xs font-bold ${nakEval.matchCountMain >= 4 ? 'bg-green-200' :
-                                                                            nakEval.matchCountMain >= 2 ? 'bg-yellow-200' :
-                                                                                'bg-gray-100'
-                                                                            }`}>
-                                                                            {nakEval.matchCountMain} matches
-                                                                        </span>
+                                                                    {evaluationSummary.length > 0 ? (
+                                                                        <div className="flex flex-wrap gap-2">
+                                                                            {evaluationSummary.map(({ strategy, best, count }) => (
+                                                                                <div
+                                                                                    key={strategy}
+                                                                                    className="rounded border-2 border-black bg-gray-100 px-2 py-1 text-xs"
+                                                                                >
+                                                                                    <div className="font-bold">{strategy}</div>
+                                                                                    <div>{best.matchCountMain} matches</div>
+                                                                                    {best.prizeText && (
+                                                                                        <div className="text-[10px]">{best.prizeText}</div>
+                                                                                    )}
+                                                                                    {count > 1 && (
+                                                                                        <div className="text-[10px]">{count} candidates</div>
+                                                                                    )}
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
                                                                     ) : '-'}
                                                                 </td>
                                                             </tr>

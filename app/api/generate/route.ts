@@ -5,6 +5,66 @@ import { loadHistoricalStats } from '@/lib/generator/history';
 import { getNextTithiChange, getNextNakshatraChange, getTithi, getNakshatra } from '@/lib/astronomy/engine';
 
 const prisma = new PrismaClient();
+const TORONTO_TZ = 'America/Toronto';
+
+function getZonedParts(date: Date, timeZone: string): {
+    year: number;
+    month: number;
+    day: number;
+    weekday: string;
+    hour: number;
+    minute: number;
+    second: number;
+} {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+
+    const parts = formatter.formatToParts(date).reduce((acc, part) => {
+        if (part.type !== 'literal') {
+            acc[part.type] = part.value;
+        }
+        return acc;
+    }, {} as Record<string, string>);
+
+    return {
+        year: Number(parts.year),
+        month: Number(parts.month),
+        day: Number(parts.day),
+        weekday: parts.weekday,
+        hour: Number(parts.hour),
+        minute: Number(parts.minute),
+        second: Number(parts.second)
+    };
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string): number {
+    const parts = getZonedParts(date, timeZone);
+    const asUTC = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    return asUTC - date.getTime();
+}
+
+function toUtcDate(
+    year: number,
+    month: number,
+    day: number,
+    hour: number,
+    minute: number,
+    second: number,
+    timeZone: string
+): Date {
+    const assumedUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    const offsetMs = getTimeZoneOffsetMs(assumedUtc, timeZone);
+    return new Date(assumedUtc.getTime() - offsetMs);
+}
 
 // Generate picks for all games immediately
 export async function POST() {
@@ -96,44 +156,25 @@ export async function POST() {
 
 // Helper to calculate next draw time
 function getNextDrawTime(gameSlug: string, drawDays: string, drawTime: string): Date {
-    const days = drawDays.split(',').map(d => d.trim());
-    const [hours, minutes] = drawTime.split(':').map(Number);
-
-    const dayMap: Record<string, number> = {
-        'Sun': 0, 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6
-    };
-
     const now = new Date();
-    const today = now.getDay();
+    const daySet = new Set(drawDays.split(',').map((d) => d.trim().toLowerCase()));
+    const [drawHour, drawMinute] = drawTime.split(':').map(Number);
 
-    // Find next draw day
-    let daysUntilDraw = 7;
-    for (const day of days) {
-        const targetDay = dayMap[day];
-        if (targetDay !== undefined) {
-            let diff = targetDay - today;
-            if (diff < 0) diff += 7;
-            if (diff === 0) {
-                // Check if draw time has passed today
-                const drawToday = new Date(now);
-                drawToday.setHours(hours, minutes, 0, 0);
-                if (now < drawToday) {
-                    daysUntilDraw = 0;
-                    break;
-                }
-                diff = 7;
-            }
-            if (diff < daysUntilDraw) {
-                daysUntilDraw = diff;
-            }
+    for (let i = 0; i <= 7; i++) {
+        const candidate = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+        const parts = getZonedParts(candidate, TORONTO_TZ);
+
+        if (!daySet.has(parts.weekday.toLowerCase())) {
+            continue;
+        }
+
+        const drawUtc = toUtcDate(parts.year, parts.month, parts.day, drawHour, drawMinute, 0, TORONTO_TZ);
+        if (drawUtc.getTime() > now.getTime()) {
+            return drawUtc;
         }
     }
 
-    const nextDraw = new Date(now);
-    nextDraw.setDate(nextDraw.getDate() + daysUntilDraw);
-    nextDraw.setHours(hours, minutes, 0, 0);
-
-    return nextDraw;
+    return new Date(now.getTime() + 24 * 60 * 60 * 1000);
 }
 
 // Get next events timing

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrutalButton } from "@/components/ui/BrutalButton";
 import { BrutalCard } from "@/components/ui/BrutalCard";
 import { Moon, RefreshCw, Play, Database, Clock, Zap } from "lucide-react";
@@ -38,6 +38,13 @@ interface GameHistory {
     };
 }
 
+interface PerformanceData {
+    spent: number;
+    won: number;
+    plays: number;
+    roi: number;
+}
+
 interface TimingInfo {
     now: string;
     current: {
@@ -55,15 +62,13 @@ export default function AdminPage() {
     const [generatedResults, setGeneratedResults] = useState<GeneratedResult[]>([]);
     const [history, setHistory] = useState<GameHistory[]>([]);
     const [timing, setTiming] = useState<TimingInfo | null>(null);
+    const [performance, setPerformance] = useState<Record<string, PerformanceData> | null>(null);
     const [message, setMessage] = useState<string>('');
 
-    // Fetch timing info on load
-    useEffect(() => {
-        fetchTiming();
-        fetchHistory();
-    }, []);
+    // State for current time to avoid hydration mismatch
+    const [now, setNow] = useState<number>(0);
 
-    const fetchTiming = async () => {
+    const fetchTiming = useCallback(async () => {
         try {
             const res = await fetch('/api/generate');
             const data = await res.json();
@@ -71,9 +76,9 @@ export default function AdminPage() {
         } catch (e) {
             console.error('Failed to fetch timing:', e);
         }
-    };
+    }, []);
 
-    const fetchHistory = async () => {
+    const fetchHistory = useCallback(async () => {
         try {
             const res = await fetch('/api/history');
             const data = await res.json();
@@ -81,7 +86,34 @@ export default function AdminPage() {
         } catch (e) {
             console.error('Failed to fetch history:', e);
         }
-    };
+    }, []);
+
+    const fetchPerformance = useCallback(async () => {
+        try {
+            const res = await fetch('/api/scheduler/result');
+            const data = await res.json();
+            if (data.performance) {
+                setPerformance(data.performance);
+            }
+        } catch (e) {
+            console.error('Failed to fetch performance:', e);
+        }
+    }, []);
+
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setNow(Date.now());
+        const interval = setInterval(() => setNow(Date.now()), 60000); // Update every minute
+        return () => clearInterval(interval);
+    }, []);
+
+    // Fetch timing info on load
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        void fetchTiming();
+        void fetchHistory();
+        void fetchPerformance();
+    }, [fetchTiming, fetchHistory, fetchPerformance]);
 
     const generatePicks = async () => {
         setLoading(true);
@@ -112,7 +144,6 @@ export default function AdminPage() {
 
     const formatCountdown = (dateStr: string) => {
         const target = new Date(dateStr).getTime();
-        const now = Date.now();
         const diff = target - now;
 
         if (diff <= 0) return 'Now';
@@ -124,7 +155,8 @@ export default function AdminPage() {
     };
 
     return (
-        <div className="min-h-screen bg-moon-bg font-sans text-foreground">
+        <div className="min-h-screen bg-moon-bg font-sans text-foreground relative overflow-hidden">
+            <div className="absolute inset-0 bg-grid-pattern -z-10" />
             {/* Navigation */}
             <nav className="fixed w-full z-50 top-0 border-b-2 border-black bg-moon-bg/95 backdrop-blur-sm">
                 <div className="flex h-20 max-w-7xl mx-auto px-6 items-center justify-between">
@@ -209,6 +241,43 @@ export default function AdminPage() {
                         {message && <span className="text-sm">{message}</span>}
                     </div>
                 </BrutalCard>
+
+                {/* Financial Performance */}
+                {performance && Object.keys(performance).length > 0 && (
+                    <BrutalCard className="bg-moon-purple text-white mb-8">
+                        <div className="flex items-center gap-3 mb-4">
+                            <Zap className="w-6 h-6 text-moon-yellow" />
+                            <h2 className="text-xl font-bold">Strategy Performance</h2>
+                        </div>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
+                            {Object.entries(performance).map(([strategy, stats]) => (
+                                <div key={strategy} className="bg-black/20 rounded-lg p-4 border border-white/10">
+                                    <div className="font-bold text-moon-yellow text-sm mb-2">{strategy}</div>
+                                    <div className="space-y-1 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="opacity-70">Plays:</span>
+                                            <span className="font-mono">{stats.plays}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="opacity-70">Spent:</span>
+                                            <span className="font-mono">${stats.spent.toFixed(2)}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="opacity-70">Won:</span>
+                                            <span className="font-mono text-green-300">${stats.won.toFixed(2)}</span>
+                                        </div>
+                                        <div className="mt-2 pt-2 border-t border-white/20 flex justify-between font-bold">
+                                            <span>ROI:</span>
+                                            <span className={stats.roi >= 0 ? "text-green-400" : "text-red-400"}>
+                                                {stats.roi > 0 ? '+' : ''}{stats.roi.toFixed(1)}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </BrutalCard>
+                )}
 
                 {/* Generated Results */}
                 {generatedResults.length > 0 && (

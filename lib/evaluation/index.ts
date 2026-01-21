@@ -1,15 +1,16 @@
 /**
- * Evaluation Selector & Matching Engine
+ * Evaluation Matching Engine
  * 
  * Features:
- * - Selects latest eligible candidate per strategy for each draw
+ * - Evaluates every candidate for a draw (one evaluation per candidate)
  * - Computes match counts between generated picks and official results
- * - Records fallback reasons when no eligible candidate exists
  */
 
 import { PrismaClient } from '@prisma/client';
+import { evaluatePrediction, type PrizeShare } from '../evaluator/prizes';
 
 const prisma = new PrismaClient();
+const TORONTO_TZ = 'America/Toronto';
 
 export interface MatchResult {
     mainMatches: number;
@@ -67,95 +68,43 @@ export function computeMatches(
     };
 }
 
-// Select the best candidate for evaluation
-export async function selectCandidateForEvaluation(
-    gameId: string,
-    drawAt: Date,
-    strategy: 'TITHI' | 'NAKSHATRA'
-): Promise<{ candidateId: string; fallbackReason?: string } | null> {
-    // Find eligible candidates for this draw and strategy
-    const candidates = await prisma.generatedCandidate.findMany({
-        where: {
-            gameId,
-            intendedDrawAt: drawAt,
-            strategy,
-            eligible: true
-        },
-        orderBy: {
-            createdAt: 'desc'
-        },
-        take: 1
-    });
-
-    if (candidates.length > 0) {
-        return { candidateId: candidates[0].id };
-    }
-
-    // Fallback: use latest non-eligible candidate
-    const fallbackCandidates = await prisma.generatedCandidate.findMany({
-        where: {
-            gameId,
-            intendedDrawAt: drawAt,
-            strategy
-        },
-        orderBy: {
-            createdAt: 'desc'
-        },
-        take: 1
-    });
-
-    if (fallbackCandidates.length > 0) {
-        return {
-            candidateId: fallbackCandidates[0].id,
-            fallbackReason: 'No eligible candidates - using latest ineligible'
-        };
-    }
-
-    return null;
+function toTorontoDateString(date: Date): string {
+    return date.toLocaleDateString('en-CA', { timeZone: TORONTO_TZ });
 }
 
-// Create evaluation for an official draw
-export async function createEvaluation(
-    officialDrawId: string,
-    strategy: 'TITHI' | 'NAKSHATRA',
-    candidateId: string,
-    matchResult: MatchResult
-): Promise<string> {
-    const evaluation = await prisma.evaluation.upsert({
-        where: {
-            officialDrawId_strategy: {
-                officialDrawId,
-                strategy
-            }
-        },
-        update: {
-            candidateId,
-            matchCountMain: matchResult.mainMatches,
-            matchCountBonus: matchResult.bonusMatches,
-            matchCountGrand: matchResult.grandMatches,
-            category: matchResult.category
-        },
-        create: {
-            officialDrawId,
-            strategy,
-            candidateId,
-            matchCountMain: matchResult.mainMatches,
-            matchCountBonus: matchResult.bonusMatches,
-            matchCountGrand: matchResult.grandMatches,
-            category: matchResult.category
+function getCandidateWindow(drawAt: Date): { start: Date; end: Date } {
+    const bufferMs = 36 * 60 * 60 * 1000;
+    return {
+        start: new Date(drawAt.getTime() - bufferMs),
+        end: new Date(drawAt.getTime() + bufferMs)
+    };
+}
+
+function parsePrizeData(prizeData: string | null): PrizeShare[] | undefined {
+    if (!prizeData) return undefined;
+    try {
+        const parsed = JSON.parse(prizeData);
+        if (Array.isArray(parsed)) {
+            return parsed;
         }
-    });
-
-    return evaluation.id;
+        if (parsed && typeof parsed === 'object') {
+            return [parsed as PrizeShare];
+        }
+        return undefined;
+    } catch {
+        return undefined;
+    }
 }
 
-// Process an official draw and create evaluations for both strategies
+// Process an official draw and create evaluations for all candidates
 export async function processOfficialDraw(officialDrawId: string): Promise<{
     evaluationsCreated: number;
+    skipped: number;
     errors: string[];
 }> {
     const errors: string[] = [];
     let evaluationsCreated = 0;
+    let skipped = 0;
 
     // Get the official draw
     const officialDraw = await prisma.officialDraw.findUnique({
@@ -164,56 +113,82 @@ export async function processOfficialDraw(officialDrawId: string): Promise<{
     });
 
     if (!officialDraw) {
-        return { evaluationsCreated: 0, errors: ['Official draw not found'] };
+        return { evaluationsCreated: 0, skipped: 0, errors: ['Official draw not found'] };
     }
 
-    const officialNumbers = JSON.parse(officialDraw.numbers) as number[];
-    const officialBonus = officialDraw.bonus ? JSON.parse(officialDraw.bonus) as number[] : undefined;
+    const drawDateKey = toTorontoDateString(officialDraw.drawAt);
+    const { start, end } = getCandidateWindow(officialDraw.drawAt);
 
-    // Process both strategies
-    for (const strategy of ['TITHI', 'NAKSHATRA'] as const) {
-        const selection = await selectCandidateForEvaluation(
-            officialDraw.gameId,
-            officialDraw.drawAt,
-            strategy
-        );
+    const candidates = await prisma.generatedCandidate.findMany({
+        where: {
+            gameId: officialDraw.gameId,
+            intendedDrawAt: {
+                gte: start,
+                lte: end
+            }
+        }
+    });
 
-        if (!selection) {
-            errors.push(`No candidate found for ${strategy} strategy`);
+    const prizeShares = parsePrizeData(officialDraw.prizeData ?? null);
+
+    for (const candidate of candidates) {
+        if (toTorontoDateString(candidate.intendedDrawAt) !== drawDateKey) {
+            skipped++;
             continue;
         }
 
-        // Get the candidate's numbers
-        const candidate = await prisma.generatedCandidate.findUnique({
-            where: { id: selection.candidateId }
-        });
+        const evaluation = evaluatePrediction(
+            officialDraw.game.slug,
+            candidate.numbers,
+            candidate.bonusNumbers,
+            officialDraw.numbers,
+            officialDraw.bonus,
+            prizeShares,
+            officialDraw.game.cost
+        );
 
-        if (!candidate) {
-            errors.push(`Candidate ${selection.candidateId} not found`);
+        if (!evaluation) {
+            skipped++;
             continue;
         }
 
-        const generatedNumbers = JSON.parse(candidate.numbers) as number[];
-        const generatedBonus = candidate.bonusNumbers ? JSON.parse(candidate.bonusNumbers) as number[] : undefined;
-
-        // Compute matches
-        const matchResult = computeMatches(
-            generatedNumbers,
-            officialNumbers,
-            generatedBonus,
-            officialBonus
-        );
-
-        // Create evaluation
         try {
-            await createEvaluation(officialDrawId, strategy, selection.candidateId, matchResult);
+            await prisma.evaluation.upsert({
+                where: {
+                    officialDrawId_candidateId: {
+                        officialDrawId,
+                        candidateId: candidate.id
+                    }
+                },
+                update: {
+                    matchCountMain: evaluation.matchCountMain,
+                    matchCountBonus: evaluation.matchCountBonus,
+                    matchCountGrand: evaluation.matchCountGrand,
+                    category: evaluation.category,
+                    prizeValue: evaluation.prizeValue,
+                    prizeText: evaluation.prizeText ?? null,
+                    strategy: candidate.strategy
+                },
+                create: {
+                    officialDrawId,
+                    candidateId: candidate.id,
+                    strategy: candidate.strategy,
+                    matchCountMain: evaluation.matchCountMain,
+                    matchCountBonus: evaluation.matchCountBonus,
+                    matchCountGrand: evaluation.matchCountGrand,
+                    category: evaluation.category,
+                    prizeValue: evaluation.prizeValue,
+                    prizeText: evaluation.prizeText ?? null
+                }
+            });
+
             evaluationsCreated++;
         } catch (e) {
-            errors.push(`Failed to create evaluation for ${strategy}: ${e}`);
+            errors.push(`Failed to create evaluation for ${candidate.strategy}: ${e}`);
         }
     }
 
-    return { evaluationsCreated, errors };
+    return { evaluationsCreated, skipped, errors };
 }
 
 // Get evaluations for a draw

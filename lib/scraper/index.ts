@@ -9,6 +9,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import type { PrizeShare } from '../evaluator/prizes';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -73,12 +74,73 @@ const GAME_RULES: Record<string, {
 };
 
 const ERROR_DIR = path.join(process.cwd(), 'scraper-errors');
+const TORONTO_TZ = 'America/Toronto';
+
+function getZonedParts(date: Date, timeZone: string): {
+    year: number;
+    month: number;
+    day: number;
+    weekday: string;
+    hour: number;
+    minute: number;
+    second: number;
+} {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+
+    const parts = formatter.formatToParts(date).reduce((acc, part) => {
+        if (part.type !== 'literal') {
+            acc[part.type] = part.value;
+        }
+        return acc;
+    }, {} as Record<string, string>);
+
+    return {
+        year: Number(parts.year),
+        month: Number(parts.month),
+        day: Number(parts.day),
+        weekday: parts.weekday,
+        hour: Number(parts.hour),
+        minute: Number(parts.minute),
+        second: Number(parts.second)
+    };
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string): number {
+    const parts = getZonedParts(date, timeZone);
+    const asUTC = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    return asUTC - date.getTime();
+}
+
+function toUtcDate(
+    year: number,
+    month: number,
+    day: number,
+    hour: number,
+    minute: number,
+    second: number,
+    timeZone: string
+): Date {
+    const assumedUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    const offsetMs = getTimeZoneOffsetMs(assumedUtc, timeZone);
+    return new Date(assumedUtc.getTime() - offsetMs);
+}
 
 export interface ParsedDraw {
     gameSlug: string;
     drawAt: Date;
     numbers: number[];
     bonus?: number[];
+    prizeShares?: PrizeShare[];
 }
 
 export interface ScrapeResult {
@@ -111,7 +173,11 @@ function parseNumberList(raw: string | undefined): number[] {
 }
 
 function buildDrawAt(dateString: string): Date {
-    return new Date(`${dateString}T22:30:00`);
+    const [year, month, day] = dateString.split('-').map(Number);
+    if (!year || !month || !day) {
+        return new Date(`${dateString}T22:30:00`);
+    }
+    return toUtcDate(year, month, day, 22, 30, 0, TORONTO_TZ);
 }
 
 function saveRawPayload(payload: unknown, gameSlug: string, error: string): string {
@@ -143,7 +209,21 @@ export function parsePastWinningNumbers(payload: unknown, gameSlug: string): Par
         response?: {
             statusCode?: string;
             description?: string;
-            winnings?: Record<string, { draw?: Array<{ date: string; main?: { regular?: string; bonus?: string } }> }>;
+            winnings?: Record<string, {
+                draw?: Array<{
+                    date: string;
+                    main?: {
+                        regular?: string;
+                        bonus?: string;
+                        prizeShares?: {
+                            prize?: PrizeShare[];
+                        };
+                    };
+                    prizeShares?: {
+                        prize?: PrizeShare[];
+                    };
+                }>;
+            }>;
         }
     };
 
@@ -161,12 +241,19 @@ export function parsePastWinningNumbers(payload: unknown, gameSlug: string): Par
     return draws.map(draw => {
         const numbers = parseNumberList(draw.main?.regular);
         const bonus = parseNumberList(draw.main?.bonus);
+        const rawPrizeShares = draw.main?.prizeShares?.prize ?? draw.prizeShares?.prize;
+        const prizeShares = Array.isArray(rawPrizeShares)
+            ? rawPrizeShares
+            : rawPrizeShares
+                ? [rawPrizeShares]
+                : undefined;
 
         return {
             gameSlug,
             drawAt: buildDrawAt(draw.date),
             numbers,
-            bonus: bonus.length > 0 ? bonus : undefined
+            bonus: bonus.length > 0 ? bonus : undefined,
+            prizeShares
         };
     });
 }
@@ -396,13 +483,15 @@ export async function ingestOfficialDraws(draws: ParsedDraw[]): Promise<{ insert
                 },
                 update: {
                     numbers: JSON.stringify(draw.numbers),
-                    bonus: draw.bonus ? JSON.stringify(draw.bonus) : null
+                    bonus: draw.bonus ? JSON.stringify(draw.bonus) : null,
+                    prizeData: draw.prizeShares ? JSON.stringify(draw.prizeShares) : null
                 },
                 create: {
                     gameId: game.id,
                     drawAt: draw.drawAt,
                     numbers: JSON.stringify(draw.numbers),
-                    bonus: draw.bonus ? JSON.stringify(draw.bonus) : null
+                    bonus: draw.bonus ? JSON.stringify(draw.bonus) : null,
+                    prizeData: draw.prizeShares ? JSON.stringify(draw.prizeShares) : null
                 }
             });
 

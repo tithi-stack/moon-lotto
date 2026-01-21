@@ -9,7 +9,8 @@ export default function Home() {
   const now = new Date();
   const nextTithiChange = getNextTithiChange(now);
   const currentTithi = getTithi(now);
-  const _currentNakshatra = getNakshatra(now);
+  // Nakshatra unused
+  // const _currentNakshatra = getNakshatra(now);
 
   return (
     <div className="min-h-screen bg-moon-bg font-sans text-foreground overflow-x-hidden">

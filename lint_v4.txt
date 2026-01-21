@@ -1,0 +1,34 @@
+﻿
+> web@0.1.0 lint
+> eslint
+
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx
+  112:14  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+C:\Users\logis\Moon Lotto\web\app\admin\page.tsx:112:14
+  110 |     // Fetch timing info on load
+  111 |     useEffect(() => {
+> 112 |         void fetchTiming();
+      |              ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  113 |         void fetchHistory();
+  114 |         void fetchPerformance();
+  115 |     }, [fetchTiming, fetchHistory, fetchPerformance]);  react-hooks/set-state-in-effect
+
+C:\Users\logis\Moon Lotto\web\app\page.tsx
+  5:40  warning  'getNakshatra' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\dashboard\audit-tests.ts
+  245:11  warning  'docsComplete' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\logis\Moon Lotto\web\lib\scraper\audit-tests.ts
+  33:16  warning  'cleanupTestData' is defined but never used  @typescript-eslint/no-unused-vars
+
+Γ£û 4 problems (1 error, 3 warnings)
+

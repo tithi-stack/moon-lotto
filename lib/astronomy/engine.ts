@@ -1,11 +1,8 @@
 import * as Astronomy from "astronomy-engine";
 
 // Configuration for Toronto (as per PRD)
-const _LOCATION = {
-    lat: 43.6532,
-    lon: -79.3832,
-    height: 0
-};
+// Configuration for Toronto (as per PRD)
+// const _LOCATION = { lat: 43.6532, lon: -79.3832, height: 0 };
 
 // Lahiri Ayanamsa (approximate for MVP, finding a library or using fixed offset)
 // For MVP, we will use a fixed offset or simple algorithm if astronomy-engine doesn't provide sidereal.

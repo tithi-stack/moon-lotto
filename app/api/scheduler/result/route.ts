@@ -1,16 +1,138 @@
 /**
  * Scheduler Result API
- * 
- * Called after a lottery draw to scrape results and evaluate predictions.
- * Compares all generated candidates with official results and builds track record.
+ *
+ * Scrapes official results, ingests official draws, and evaluates all
+ * generated candidates for each draw (one evaluation per candidate).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { scrapeGameHistory, ingestOfficialDraws } from '@/lib/scraper';
+import { evaluatePrediction, type PrizeShare } from '@/lib/evaluator/prizes';
 
 interface ResultPayload {
+    gameSlug?: string;
+    startDate?: string; // YYYY-MM-DD
+    endDate?: string;   // YYYY-MM-DD
+}
+
+const TORONTO_TZ = 'America/Toronto';
+
+function formatDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function toTorontoDateString(date: Date): string {
+    return date.toLocaleDateString('en-CA', { timeZone: TORONTO_TZ });
+}
+
+function getCandidateWindow(drawAt: Date): { start: Date; end: Date } {
+    const bufferMs = 36 * 60 * 60 * 1000;
+    return {
+        start: new Date(drawAt.getTime() - bufferMs),
+        end: new Date(drawAt.getTime() + bufferMs)
+    };
+}
+
+function parsePrizeData(prizeData: string | null): PrizeShare[] | undefined {
+    if (!prizeData) return undefined;
+    try {
+        const parsed = JSON.parse(prizeData);
+        if (Array.isArray(parsed)) {
+            return parsed;
+        }
+        if (parsed && typeof parsed === 'object') {
+            return [parsed as PrizeShare];
+        }
+        return undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+async function evaluateCandidatesForDraw(params: {
+    gameId: string;
     gameSlug: string;
-    drawDate?: string; // Optional - if not provided, uses today
+    gameCost: number;
+    drawAt: Date;
+    officialDrawId: string;
+    officialNumbers: string;
+    officialBonus: string | null;
+    prizeShares?: PrizeShare[];
+}): Promise<{ evaluated: number; skipped: number }> {
+    const { start, end } = getCandidateWindow(params.drawAt);
+    const drawDateKey = toTorontoDateString(params.drawAt);
+
+    const candidates = await prisma.generatedCandidate.findMany({
+        where: {
+            gameId: params.gameId,
+            intendedDrawAt: {
+                gte: start,
+                lte: end
+            }
+        }
+    });
+
+    let evaluated = 0;
+    let skipped = 0;
+
+    for (const candidate of candidates) {
+        if (toTorontoDateString(candidate.intendedDrawAt) !== drawDateKey) {
+            skipped++;
+            continue;
+        }
+
+        const evaluation = evaluatePrediction(
+            params.gameSlug,
+            candidate.numbers,
+            candidate.bonusNumbers,
+            params.officialNumbers,
+            params.officialBonus,
+            params.prizeShares,
+            params.gameCost
+        );
+
+        if (!evaluation) {
+            skipped++;
+            continue;
+        }
+
+        await prisma.evaluation.upsert({
+            where: {
+                officialDrawId_candidateId: {
+                    officialDrawId: params.officialDrawId,
+                    candidateId: candidate.id
+                }
+            },
+            update: {
+                matchCountMain: evaluation.matchCountMain,
+                matchCountBonus: evaluation.matchCountBonus,
+                matchCountGrand: evaluation.matchCountGrand,
+                category: evaluation.category,
+                prizeValue: evaluation.prizeValue,
+                prizeText: evaluation.prizeText ?? null,
+                strategy: candidate.strategy
+            },
+            create: {
+                officialDrawId: params.officialDrawId,
+                candidateId: candidate.id,
+                strategy: candidate.strategy,
+                matchCountMain: evaluation.matchCountMain,
+                matchCountBonus: evaluation.matchCountBonus,
+                matchCountGrand: evaluation.matchCountGrand,
+                category: evaluation.category,
+                prizeValue: evaluation.prizeValue,
+                prizeText: evaluation.prizeText ?? null
+            }
+        });
+
+        evaluated++;
+    }
+
+    return { evaluated, skipped };
 }
 
 export async function POST(request: NextRequest) {
@@ -24,109 +146,90 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        const payload: ResultPayload = await request.json();
-        const { gameSlug } = payload;
+        const payload: ResultPayload = await request.json().catch(() => ({}));
+        const now = new Date();
 
-        console.log(`[Result API] Fetching results for ${gameSlug}`);
+        const games = payload.gameSlug
+            ? await prisma.game.findMany({ where: { slug: payload.gameSlug } })
+            : await prisma.game.findMany();
 
-        // Get the game
-        const game = await prisma.game.findUnique({
-            where: { slug: gameSlug }
-        });
-
-        if (!game) {
-            return NextResponse.json({ error: `Game not found: ${gameSlug}` }, { status: 404 });
-        }
-
-        // Scrape the latest result (using existing scraper logic)
-        // For now, we'll just check if there's a recent official draw
-        const latestDraw = await prisma.officialDraw.findFirst({
-            where: { gameId: game.id },
-            orderBy: { drawAt: 'desc' }
-        });
-
-        if (!latestDraw) {
-            return NextResponse.json({
-                success: false,
-                message: 'No official draw found. Run scraper first.'
-            });
-        }
-
-        // Find all candidates that were intended for this draw and haven't been evaluated
-        const candidates = await prisma.generatedCandidate.findMany({
-            where: {
-                gameId: game.id,
-                eligible: true,
-                // Check if not already evaluated
-                evaluations: {
-                    none: {}
-                },
-                // Intended for draws on or before latest official
-                intendedDrawAt: {
-                    lte: latestDraw.drawAt
-                }
-            }
-        });
-
-        console.log(`[Result API] Found ${candidates.length} candidates to evaluate`);
-
-        const officialNumbers: number[] = JSON.parse(latestDraw.numbers);
-        const officialBonus: number[] | null = latestDraw.bonus ? JSON.parse(latestDraw.bonus) : null;
-
-        const evaluations: Array<{
-            strategy: string;
-            matchCountMain: number;
-            matchCountBonus: number;
-            numbers: number[];
+        const results: Array<{
+            game: string;
+            drawsScraped: number;
+            drawsIngested: number;
+            candidatesEvaluated: number;
+            candidatesSkipped: number;
+            errors: string[];
         }> = [];
 
-        for (const candidate of candidates) {
-            const candidateNumbers: number[] = JSON.parse(candidate.numbers);
+        const lookbackDays = parseInt(process.env.RESULTS_SYNC_LOOKBACK_DAYS || '10', 10);
 
-            // Calculate matches
-            const matchCountMain = candidateNumbers.filter(n => officialNumbers.includes(n)).length;
-            const matchCountBonus = officialBonus
-                ? candidateNumbers.filter(n => officialBonus.includes(n)).length
-                : 0;
-
-            // Determine prize category (simplified)
-            const category = getPrizeCategory(game.slug, matchCountMain, matchCountBonus);
-
-            // Create evaluation record
-            await prisma.evaluation.create({
-                data: {
-                    officialDrawId: latestDraw.id,
-                    strategy: candidate.strategy,
-                    candidateId: candidate.id,
-                    matchCountMain,
-                    matchCountBonus,
-                    category,
-                    prizeValue: null // Could calculate based on prize table
-                }
+        for (const game of games) {
+            const latestOfficial = await prisma.officialDraw.findFirst({
+                where: { gameId: game.id },
+                orderBy: { drawAt: 'desc' }
             });
 
-            evaluations.push({
-                strategy: candidate.strategy,
-                matchCountMain,
-                matchCountBonus,
-                numbers: candidateNumbers
+            const rangeStart = payload.startDate
+                ?? formatDate(new Date((latestOfficial?.drawAt ?? now).getTime() - lookbackDays * 24 * 60 * 60 * 1000));
+            const rangeEnd = payload.endDate ?? formatDate(now);
+
+            const scrape = await scrapeGameHistory(game.slug, {
+                startDate: rangeStart,
+                endDate: rangeEnd
+            });
+
+            const ingestion = await ingestOfficialDraws(scrape.draws);
+
+            let candidatesEvaluated = 0;
+            let candidatesSkipped = 0;
+
+            for (const draw of scrape.draws) {
+                const officialDraw = await prisma.officialDraw.findUnique({
+                    where: {
+                        gameId_drawAt: {
+                            gameId: game.id,
+                            drawAt: draw.drawAt
+                        }
+                    }
+                });
+
+                if (!officialDraw) {
+                    continue;
+                }
+
+                const prizeShares = draw.prizeShares ?? parsePrizeData(officialDraw.prizeData ?? null);
+
+                const evalResult = await evaluateCandidatesForDraw({
+                    gameId: game.id,
+                    gameSlug: game.slug,
+                    gameCost: game.cost,
+                    drawAt: draw.drawAt,
+                    officialDrawId: officialDraw.id,
+                    officialNumbers: officialDraw.numbers,
+                    officialBonus: officialDraw.bonus,
+                    prizeShares
+                });
+
+                candidatesEvaluated += evalResult.evaluated;
+                candidatesSkipped += evalResult.skipped;
+            }
+
+            results.push({
+                game: game.slug,
+                drawsScraped: scrape.draws.length,
+                drawsIngested: ingestion.inserted,
+                candidatesEvaluated,
+                candidatesSkipped,
+                errors: [...scrape.errors, ...ingestion.errors]
             });
         }
-
-        // Calculate summary stats
-        const summary = calculateTrackRecord(evaluations);
 
         return NextResponse.json({
             success: true,
-            gameSlug,
-            drawDate: latestDraw.drawAt.toISOString(),
-            officialNumbers,
-            officialBonus,
-            candidatesEvaluated: evaluations.length,
-            evaluations,
-            trackRecord: summary
+            refreshedAt: now.toISOString(),
+            results
         });
-
     } catch (error) {
         console.error('[Result API] Error:', error);
         return NextResponse.json(
@@ -136,84 +239,54 @@ export async function POST(request: NextRequest) {
     }
 }
 
-/**
- * Determine prize category based on matches
- */
-function getPrizeCategory(gameSlug: string, mainMatches: number, bonusMatches: number): string | null {
-    // Simplified prize categories
-    if (gameSlug === 'lotto-max') {
-        if (mainMatches === 7) return 'JACKPOT';
-        if (mainMatches === 6) return '2ND';
-        if (mainMatches === 5) return '3RD';
-        if (mainMatches === 4) return '4TH';
-        if (mainMatches === 3) return 'FREE_PLAY';
-    } else if (gameSlug === 'lotto-649') {
-        if (mainMatches === 6) return 'JACKPOT';
-        if (mainMatches === 5 && bonusMatches >= 1) return '2ND';
-        if (mainMatches === 5) return '3RD';
-        if (mainMatches === 4) return '4TH';
-        if (mainMatches === 3) return '5TH';
-        if (mainMatches === 2 && bonusMatches >= 1) return '6TH';
-        if (mainMatches === 2) return 'FREE_PLAY';
-    } else if (gameSlug === 'daily-grand') {
-        if (mainMatches === 5 && bonusMatches === 1) return 'JACKPOT';
-        if (mainMatches === 5) return '2ND';
-        if (mainMatches === 4 && bonusMatches === 1) return '3RD';
-        if (mainMatches === 4) return '4TH';
-        if (mainMatches === 3 && bonusMatches === 1) return '5TH';
-        if (mainMatches === 3) return '6TH';
-        if (mainMatches === 2 && bonusMatches === 1) return '7TH';
-        if (mainMatches === 1 && bonusMatches === 1) return '8TH';
-        if (mainMatches === 0 && bonusMatches === 1) return 'BONUS_ONLY';
-    } else if (gameSlug === 'lottario') {
-        if (mainMatches === 6) return 'JACKPOT';
-        if (mainMatches === 5 && bonusMatches >= 1) return '2ND';
-        if (mainMatches === 5) return '3RD';
-        if (mainMatches === 4) return '4TH';
-        if (mainMatches === 3) return '5TH';
-        if (mainMatches === 2) return 'FREE_PLAY';
-    }
-
-    return null;
-}
-
-/**
- * Calculate track record summary
- */
-function calculateTrackRecord(evaluations: Array<{ strategy: string; matchCountMain: number }>) {
-    const byStrategy: Record<string, { total: number; hits: Record<number, number> }> = {};
-
-    for (const ev of evaluations) {
-        if (!byStrategy[ev.strategy]) {
-            byStrategy[ev.strategy] = { total: 0, hits: {} };
-        }
-        byStrategy[ev.strategy].total++;
-        byStrategy[ev.strategy].hits[ev.matchCountMain] =
-            (byStrategy[ev.strategy].hits[ev.matchCountMain] || 0) + 1;
-    }
-
-    return byStrategy;
-}
-
-// GET endpoint to check status
+// GET endpoint to check status and return global performance
 export async function GET() {
     try {
-        // Return summary of all evaluations
-        const summary = await prisma.evaluation.groupBy({
-            by: ['strategy'],
-            _count: { id: true },
-            _avg: { matchCountMain: true }
+        // Fetch all evaluations with game details to calculate cost
+        const evaluations = await prisma.evaluation.findMany({
+            include: {
+                officialDraw: {
+                    include: {
+                        game: true
+                    }
+                }
+            }
         });
+
+        // Aggregate stats by strategy
+        const performance: Record<string, { spent: number; won: number; plays: number; roi: number }> = {};
+
+        for (const ev of evaluations) {
+            const strat = ev.strategy;
+            const cost = ev.officialDraw.game.cost;
+            const prize = ev.prizeValue || 0;
+
+            if (!performance[strat]) {
+                performance[strat] = { spent: 0, won: 0, plays: 0, roi: 0 };
+            }
+
+            performance[strat].spent += cost;
+            performance[strat].won += prize;
+            performance[strat].plays += 1;
+        }
+
+        // Calculate ROI
+        for (const strat in performance) {
+            const p = performance[strat];
+            if (p.spent > 0) {
+                p.roi = ((p.won - p.spent) / p.spent) * 100;
+            }
+        }
 
         return NextResponse.json({
             endpoint: '/api/scheduler/result',
-            description: 'Evaluates predictions against official results',
-            trackRecord: summary
+            description: 'Scrapes official results and evaluates all candidates',
+            performance
         });
-    } catch {
+    } catch (error) {
         return NextResponse.json({
-            endpoint: '/api/scheduler/result',
-            description: 'Evaluates predictions against official results'
-        });
+            error: 'Failed to fetch performance stats',
+            details: String(error)
+        }, { status: 500 });
     }
 }
