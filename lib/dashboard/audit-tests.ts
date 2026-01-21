@@ -238,12 +238,6 @@ async function testDeploymentNotes(): Promise<TestResult> {
         hasWorkerDocs = content.includes('worker') || content.includes('run');
     }
 
-    // Using variables in details
-    const passed = hasReadme && hasEnvFile && hasDbUrl;
-
-    // Silence unused warning by using them in debug string or checking them
-    const docsComplete = hasEnvVarsDocs && hasWorkerDocs;
-
     // Check .env for required variables
     let hasDbUrl = false;
     if (hasEnvFile) {
@@ -258,7 +252,7 @@ async function testDeploymentNotes(): Promise<TestResult> {
         passed,
         details: passed
             ? `README.md exists, .env with DATABASE_URL found`
-            : `README=${hasReadme}, EnvFile=${hasEnvFile}, DbUrl=${hasDbUrl}`
+            : `README=${hasReadme}, EnvFile=${hasEnvFile}, DbUrl=${hasDbUrl}, Docs=${hasEnvVarsDocs}`
     };
 }
 
