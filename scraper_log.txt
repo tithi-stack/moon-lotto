@@ -1,0 +1,29 @@
+﻿
+> web@0.1.0 audit:scraper
+> tsx lib/scraper/audit-tests.ts
+
+============================================================
+STEP 4.1 AUDIT - Results Scraping + Evaluation + Matching
+============================================================
+
+Γ£à PASS: Parser Robustness: Payload Change ΓåÆ Error + Raw Payload Saved
+       Error captured: "Missing draw list for daily-grand...". Payload saved to C:\Users\logis\Moon Lotto\web\scraper-errors\daily-grand_2026-01-20T02-55-52-818Z.json
+
+Γ¥î FAIL: Idempotency: Rerun Scraper Does Not Duplicate Draws
+       Expected 1 draw, found 0. Inserts: 0, 0, 0
+
+Γ£à PASS: Fixture Tests: Known Inputs ΓåÆ Expected Match Counts
+       All 4 fixture tests passed: 3-match, 0-match, jackpot, grand-match
+
+Γ£à PASS: Match Edge Cases
+       All 4 edge case tests passed
+
+Γ£à PASS: Category Assignment
+       All 4 category tests passed
+
+Γ£à PASS: Valid Fixture Parsing
+       Successfully parsed 5 draws from fixture JSON
+
+============================================================
+SUMMARY: 5 passed, 1 failed
+============================================================

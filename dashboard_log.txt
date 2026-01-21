@@ -1,0 +1,29 @@
+﻿
+> web@0.1.0 audit:dashboard
+> tsx lib/dashboard/audit-tests.ts
+
+============================================================
+STEP 5.1 AUDIT - Dashboard + Analytics + Reliability
+============================================================
+
+Γ¥î FAIL: End-to-End Simulation
+       Game not found
+
+Γ¥î FAIL: Performance Sanity: No Slow Queries
+       5 slow queries: Get all games:185ms, Get latest candidates (all games):920ms, Get recent evaluations with relations:214ms, Aggregate evaluation stats:184ms, Group by strategy:167ms
+
+Γ£à PASS: Deployment Notes: Documentation Exists
+       README.md exists, .env with DATABASE_URL found
+
+Γ£à PASS: Worker Restart Safety: State Recovery
+       Job run logged and recoverable. Can resume from last known state.
+
+Γ£à PASS: Cost Tracking Calculation
+       Total: $0.00. 
+
+Γ£à PASS: Match Distribution & Strategy Comparison
+       Distribution: . Strategy: 
+
+============================================================
+SUMMARY: 4 passed, 2 failed
+============================================================
