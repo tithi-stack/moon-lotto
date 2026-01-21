@@ -2,13 +2,13 @@
  * Scheduler Generation API
  * 
  * Called by Cloudflare Durable Object when Tithi/Nakshatra changes.
- * Generates 5 lines per strategy for each game and saves to database.
+ * Generates 1 line per strategy (5 strategies) for each game and saves to database.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { generateNumbers, GAME_CONFIGS, type Strategy } from '@/lib/generator';
-import { getTithi, getNakshatra } from '@/lib/astronomy/engine';
+import { generateMultiStrategy, STRATEGIES, type MultiStrategy } from '@/lib/generator/multi-strategy';
+import { GAME_CONFIGS } from '@/lib/generator';
 
 interface GenerationPayload {
     eventType: 'TITHI_CHANGE' | 'NAKSHATRA_CHANGE';
@@ -80,50 +80,53 @@ export async function POST(request: NextRequest) {
             // Check eligibility based on draw schedule
             const eligibility = checkEligibility(game, eventTime);
 
-            // Generate for each strategy
+            // Generate for each strategy (5 strategies, 1 line each)
             for (const strategyName of payload.strategies) {
-                const strategy = strategyName as Strategy;
+                const strategy = strategyName as MultiStrategy;
 
-                // Generate multiple lines
-                for (let lineNum = 1; lineNum <= payload.linesPerStrategy; lineNum++) {
-                    // Create unique seed for each line
-                    const baseSeed = eventTime.getTime();
-                    const lineSeed = baseSeed + (strategy === 'TITHI' ? 0 : 10000) + lineNum;
-
-                    const genResult = generateNumbers(
-                        gameSlug,
-                        strategy,
-                        eventTime,
-                        lineSeed
-                    );
-
-                    // Save to database
-                    await prisma.generatedCandidate.create({
-                        data: {
-                            gameId: game.id,
-                            strategy: strategy,
-                            eventId: generationEvent.id,
-                            intendedDrawAt: eligibility.nextDrawTime,
-                            numbers: JSON.stringify(genResult.mainNumbers),
-                            bonusNumbers: genResult.bonusNumbers ? JSON.stringify(genResult.bonusNumbers) : null,
-                            eligible: eligibility.eligible,
-                            eligibilityReason: eligibility.reason,
-                            modifierApplied: genResult.modifierApplied,
-                            modifierBefore: genResult.modifierBefore?.toString(),
-                            modifierAfter: genResult.modifierAfter?.toString(),
-                            modifierRepairSteps: genResult.modifierRepairSteps
-                        }
-                    });
-
-                    results.push({
-                        game: gameSlug,
-                        strategy,
-                        line: lineNum,
-                        numbers: genResult.mainNumbers,
-                        bonus: genResult.bonusNumbers,
-                        eligible: eligibility.eligible
-                    });
+                // Validate strategy
+                if (!STRATEGIES.includes(strategy)) {
+                    console.warn(`Unknown strategy: ${strategyName}`);
+                    continue;
                 }
+
+                // Create unique seed for each strategy
+                const baseSeed = eventTime.getTime();
+                const strategySeed = baseSeed + STRATEGIES.indexOf(strategy) * 1000;
+
+                const genResult = generateMultiStrategy(
+                    gameSlug,
+                    strategy,
+                    eventTime,
+                    strategySeed
+                );
+
+                // Save to database
+                await prisma.generatedCandidate.create({
+                    data: {
+                        gameId: game.id,
+                        strategy: strategy,
+                        eventId: generationEvent.id,
+                        intendedDrawAt: eligibility.nextDrawTime,
+                        numbers: JSON.stringify(genResult.mainNumbers),
+                        bonusNumbers: genResult.bonusNumbers ? JSON.stringify(genResult.bonusNumbers) : null,
+                        eligible: eligibility.eligible,
+                        eligibilityReason: eligibility.reason,
+                        modifierApplied: genResult.isFullMoon,
+                        modifierBefore: null,
+                        modifierAfter: null,
+                        modifierRepairSteps: null
+                    }
+                });
+
+                results.push({
+                    game: gameSlug,
+                    strategy,
+                    line: 1,
+                    numbers: genResult.mainNumbers,
+                    bonus: genResult.bonusNumbers,
+                    eligible: eligibility.eligible
+                });
             }
         }
 
