@@ -1,8 +1,9 @@
 import { PrismaClient } from '@prisma/client';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { generateNumbers, GAME_CONFIGS } from '@/lib/generator';
 import { loadHistoricalStats } from '@/lib/generator/history';
 import { getNextTithiChange, getNextNakshatraChange, getTithi, getNakshatra } from '@/lib/astronomy/engine';
+import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 
 const prisma = new PrismaClient();
 const TORONTO_TZ = 'America/Toronto';
@@ -67,8 +68,18 @@ function toUtcDate(
 }
 
 // Generate picks for all games immediately
-export async function POST() {
+export async function POST(request: NextRequest) {
     try {
+        // Rate limiting
+        const clientId = getClientIdentifier(request);
+        const rateLimit = await checkRateLimit(`generate:${clientId}`);
+        if (!rateLimit.success) {
+            return NextResponse.json(
+                { error: 'Rate limit exceeded. Please try again later.' },
+                { status: 429, headers: { 'Retry-After': '60' } }
+            );
+        }
+
         const games = await prisma.game.findMany();
         const now = new Date();
         const results = [];

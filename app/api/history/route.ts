@@ -1,15 +1,26 @@
 import { PrismaClient } from '@prisma/client';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 
 const prisma = new PrismaClient();
 
 // Get historical draws for all games
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const gameSlug = searchParams.get('game');
     const limit = parseInt(searchParams.get('limit') || '108');
 
     try {
+        // Rate limiting
+        const clientId = getClientIdentifier(request);
+        const rateLimit = await checkRateLimit(`history:${clientId}`);
+        if (!rateLimit.success) {
+            return NextResponse.json(
+                { error: 'Rate limit exceeded' },
+                { status: 429, headers: { 'Retry-After': '60' } }
+            );
+        }
+
         let games;
 
         if (gameSlug) {

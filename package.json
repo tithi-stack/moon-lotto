@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "@prisma/client": "5.10.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.1",
     "astronomy-engine": "^2.1.19",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",

@@ -137,13 +137,16 @@ async function evaluateCandidatesForDraw(params: {
 
 export async function POST(request: NextRequest) {
     try {
-        // Verify API secret if configured
+        // Verify API secret - REQUIRED for security
         const apiSecret = process.env.SCHEDULER_API_SECRET;
-        if (apiSecret) {
-            const providedSecret = request.headers.get('X-API-Secret');
-            if (providedSecret !== apiSecret) {
-                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-            }
+        if (!apiSecret) {
+            console.error('[SECURITY] SCHEDULER_API_SECRET not configured');
+            return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
+        }
+
+        const providedSecret = request.headers.get('X-API-Secret');
+        if (providedSecret !== apiSecret) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const payload: ResultPayload = await request.json().catch(() => ({}));
@@ -233,7 +236,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
         console.error('[Result API] Error:', error);
         return NextResponse.json(
-            { error: 'Result processing failed', details: String(error) },
+            { error: 'Result processing failed' },
             { status: 500 }
         );
     }
@@ -284,9 +287,9 @@ export async function GET() {
             performance
         });
     } catch (error) {
+        console.error('[Result API GET] Error:', error);
         return NextResponse.json({
-            error: 'Failed to fetch performance stats',
-            details: String(error)
+            error: 'Failed to fetch performance stats'
         }, { status: 500 });
     }
 }

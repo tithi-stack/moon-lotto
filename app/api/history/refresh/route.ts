@@ -20,12 +20,16 @@ const REQUIRED_DRAWS: Record<string, number> = {
 
 export async function POST(request: Request) {
     try {
+        // Verify API secret - REQUIRED for security
         const apiSecret = process.env.SCHEDULER_API_SECRET;
-        if (apiSecret) {
-            const providedSecret = request.headers.get('X-API-Secret');
-            if (providedSecret !== apiSecret) {
-                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-            }
+        if (!apiSecret) {
+            console.error('[SECURITY] SCHEDULER_API_SECRET not configured');
+            return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
+        }
+
+        const providedSecret = request.headers.get('X-API-Secret');
+        if (providedSecret !== apiSecret) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
         const payload = await request.json().catch(() => null) as { gameSlug?: string } | null;

@@ -1,10 +1,21 @@
 import { PrismaClient } from '@prisma/client';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 
 const prisma = new PrismaClient();
 
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
+        // Rate limiting (more lenient for read-only)
+        const clientId = getClientIdentifier(request);
+        const rateLimit = await checkRateLimit(`dashboard:${clientId}`);
+        if (!rateLimit.success) {
+            return NextResponse.json(
+                { error: 'Rate limit exceeded' },
+                { status: 429, headers: { 'Retry-After': '60' } }
+            );
+        }
+
         // Get all games with their latest candidates and stats
         const games = await prisma.game.findMany({
             include: {
