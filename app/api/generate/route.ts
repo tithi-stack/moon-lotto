@@ -1,11 +1,9 @@
-import { PrismaClient } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateNumbers, GAME_CONFIGS } from '@/lib/generator';
 import { loadHistoricalStats } from '@/lib/generator/history';
 import { getNextTithiChange, getNextNakshatraChange, getTithi, getNakshatra } from '@/lib/astronomy/engine';
 import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 const TORONTO_TZ = 'America/Toronto';
 
 function getZonedParts(date: Date, timeZone: string): {

@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { scrapeGameHistory, ingestHistoricalDraws } from '@/lib/scraper';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 function formatDate(date: Date): string {
     const year = date.getFullYear();

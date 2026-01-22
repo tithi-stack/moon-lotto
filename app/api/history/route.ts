@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 // Get historical draws for all games
 export async function GET(request: NextRequest) {
