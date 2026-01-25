@@ -71,32 +71,63 @@ export default function AdminPage() {
     const fetchTiming = useCallback(async () => {
         try {
             const res = await fetch('/api/generate');
+            
+            if (!res.ok) {
+                console.error('Generate API error:', res.status, res.statusText);
+                setTiming(null);
+                return;
+            }
+            
             const data = await res.json();
             setTiming(data);
         } catch (e) {
             console.error('Failed to fetch timing:', e);
+            setTiming(null);
         }
     }, []);
 
     const fetchHistory = useCallback(async () => {
         try {
             const res = await fetch('/api/history');
+            
+            if (!res.ok) {
+                console.error('History API error:', res.status, res.statusText);
+                setHistory([]);
+                return;
+            }
+            
             const data = await res.json();
-            setHistory(data);
+            
+            // Validate that we received an array
+            if (!Array.isArray(data)) {
+                console.error('History API returned non-array data:', data);
+                setHistory([]);
+            } else {
+                setHistory(data);
+            }
         } catch (e) {
             console.error('Failed to fetch history:', e);
+            setHistory([]);
         }
     }, []);
 
     const fetchPerformance = useCallback(async () => {
         try {
             const res = await fetch('/api/scheduler/result');
+            
+            if (!res.ok) {
+                console.error('Scheduler API error:', res.status, res.statusText);
+                setPerformance(null);
+                return;
+            }
+            
             const data = await res.json();
             if (data.performance) {
                 setPerformance(data.performance);
             }
         } catch (e) {
             console.error('Failed to fetch performance:', e);
+            setPerformance(null);
         }
     }, []);
 
@@ -120,6 +151,12 @@ export default function AdminPage() {
         setMessage('Generating picks...');
         try {
             const res = await fetch('/api/generate', { method: 'POST' });
+            
+            if (!res.ok) {
+                setMessage(`❌ Error: Server returned ${res.status} ${res.statusText}`);
+                return;
+            }
+            
             const data = await res.json();
             if (data.success) {
                 setGeneratedResults(data.results);

@@ -120,10 +120,26 @@ export default function HistoryPage() {
     const fetchHistory = useCallback(async () => {
         try {
             const res = await fetch('/api/history');
+            
+            if (!res.ok) {
+                console.error('History API error:', res.status, res.statusText);
+                setHistory([]);
+                setLoading(false);
+                return;
+            }
+            
             const data = await res.json();
-            setHistory(data);
+            
+            // Validate that we received an array
+            if (!Array.isArray(data)) {
+                console.error('History API returned non-array data:', data);
+                setHistory([]);
+            } else {
+                setHistory(data);
+            }
         } catch (e) {
             console.error('Failed to fetch history:', e);
+            setHistory([]);
         }
         setLoading(false);
     }, []);
