@@ -177,7 +177,7 @@ export default function Home() {
             <span className="font-bold text-xl font-heading">Moon Lotto</span>
           </div>
           <div className="text-zinc-500 text-sm font-medium">
-            © 2026 Moon Lotto. Personal Project.
+            (c) 2026 Moon Lotto. Personal Project.
           </div>
         </div>
       </footer>
